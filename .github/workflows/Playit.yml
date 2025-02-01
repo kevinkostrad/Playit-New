@@ -1,0 +1,62 @@
+name: Playit RDP Tunnel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup-rdp-tunnel:
+    runs-on: windows-latest
+
+    steps:
+    - name: Check out the repository
+      uses: actions/checkout@v2
+
+    - name: Download and Install Playit
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
+        Start-Sleep -Seconds 5  # Tunggu 5 detik agar unduhan selesai
+
+    # Mengaktifkan Remote Desktop (RDP)
+    - name: Enable TS
+      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "p@ssw0rd!" -Force)
+
+    - name: Start Playit and Set Up RDP Tunnel
+      env:
+        PLAYIT_AUTH_KEY: ${{ secrets.PL }} 
+      run: |
+        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow -Wait
+        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -NoNewWindow
+
+    # Menjaga GitHub Runner tetap aktif selama 6 jam
+    - name: Keep GitHub Runner Alive
+      run: |
+          $duration = 21600  # 6 jam dalam detik
+          $interval = 300    # Setiap 5 menit kirim log agar dianggap aktif
+          
+          for ($i = 0; $i -lt $duration / $interval; $i++) {
+              Write-Output "Runner masih aktif: $(Get-Date)"
+              Start-Sleep -Seconds $interval
+          }
+
+    # Memastikan Playit tetap berjalan selama 6 jam
+    - name: Keep Playit Alive
+      run: |
+          $duration = 21600  # 6 jam dalam detik
+          $interval = 300    # Cek setiap 5 menit (300 detik)
+          
+          for ($i = 0; $i -lt $duration / $interval; $i++) {
+              # Periksa apakah Playit masih berjalan
+              $process = Get-Process | Where-Object { $_.ProcessName -like "playit*" }
+              
+              if ($process) {
+                  Write-Output "Playit masih berjalan: $(Get-Date)"
+              } else {
+                  Write-Output "Playit mati, mencoba menjalankan ulang..."
+                  Start-Process -FilePath "$env:USERPROFILE\playit.exe" -NoNewWindow
+              }
+              
+              Start-Sleep -Seconds $interval
+          }
